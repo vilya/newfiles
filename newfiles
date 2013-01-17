@@ -1,0 +1,262 @@
+#!/usr/bin/env python
+import sys, os, optparse, shutil, re, fnmatch
+
+# Regenerate QtCreator project files to reflect changes in the file system
+# outside of the IDE (e.g. after updating from version control). We process the
+# ProjectName.files and ProjectName.includes files.
+#
+# The algorithm for each of the files is:
+# 1. Read the existing file and store all the files in a sorted list.
+# 2. Scan the file system for relevant files and store them all in a sorted
+#    list.
+# 3. Diff the two lists to determine which files have been added or removed.
+# 4. Backup the existing project file .
+# 5. Write the list from step 2 over the top of the existing project file.
+#
+# We have both a whitelist and a blacklist for files. Only files which match
+# an expression in the whitelist, but not one in the blacklist, are included in
+# the project. We check both the filename without any path info and the
+# relative path to the file from the project root against these lists.
+#
+# For include directories we also have a separate whitelist and blacklist, with
+# the same semantics as the file lists.
+#
+# Finally, there's a directory blacklist; we will not traverse any directory
+# which matches against this.
+
+
+#
+# Config variables
+#
+
+# Expressions for files to include, using glob-syntax.
+file_whitelist = [
+  "*.h", "*.c", "*.cpp", "*.cc", "*.cxx", "*.hh", "*.hpp", "*.ui", "*.xsl",
+  "*.xml", "*.mm", "*.qrc", "*.png", "*.svg", "*.H", "*.c++", "*.txt", "*.xpm",
+  "*.jpg", "*.tif", "*.tiff", "*.m", "*.gif", "*.bmp", "*.ico", "*.hxx",
+  "*.cmake", "*.py"
+]
+
+# Expressions for files to exclude, using glob-syntax.
+file_blacklist = [
+]
+
+# Expressions for directories to treat as include dirs.
+inc_whitelist = [
+  "*/include"
+]
+
+# Expressions for directories to NOT treat as include dirs, if they otherwise would be.
+inc_blacklist = [
+]
+
+# Expressions, using glob-syntax, of directories we shouldn't traverse.
+dir_blacklist = [
+  "*/.svn", "*/CVS", "*/.git", "*/.uic", "*/.hg"
+]
+
+
+#
+# Functions for finding existing files
+#
+
+def matches_any(s, glob_list):
+  for expr in glob_list:
+    if fnmatch.fnmatch(s, expr):
+      return True
+  return False
+
+
+def apply_filters(paths, whitelist, blacklist):
+  relevant_paths = set([])
+  for expr in whitelist:
+    passed = fnmatch.filter(paths, expr)
+    relevant_paths |= set(passed)
+  for expr in blacklist:
+    passed = fnmatch.filter(relevant_paths, expr)
+    relevant_paths -= set(passed)
+  return relevant_paths
+
+
+def is_blacklisted_dir(path):
+  return matches_any(path, dir_blacklist)
+
+
+def walk_unblacklisted_dirs(startdir):
+  startpos = len(startdir)
+  if not startdir.endswith(os.sep):
+    startpos += len(os.sep)
+
+  for path, subdirs, files in os.walk(startdir):
+    # Skip any blacklisted subdirectories.
+    subdirs[:] = [s for s in subdirs if not is_blacklisted_dir(os.path.join(path, s))]
+
+    # Pass-through the remaining info
+    relpath = path[startpos:]
+    yield relpath, subdirs, files
+
+
+def find_existing(startdir, whitelist, blacklist, dirs=False):
+  for relpath, subdirs, files in walk_unblacklisted_dirs(startdir):
+    # Yield up any relevant files from this directory.
+    items = subdirs if dirs else files
+    paths = [os.path.join(relpath, i) for i in items]
+    relevant_paths = apply_filters(paths, whitelist, blacklist)
+    for p in relevant_paths:
+      yield p
+
+
+def guess_file(ext):
+  '''Guess which file to use given a file extension.
+  
+  This will return the only file in the current directory with that extension.
+  If there are no files, or if there is more than one, it will return None.'''
+  candidates = [f for f in os.listdir(os.getcwd()) if f.endswith(ext) and os.path.isfile(f)]
+  return candidates[0] if len(candidates) == 1 else None
+
+
+#
+# Algorithms
+#
+
+def diff_lists(old_list, new_list):
+  o = 0
+  n = 0
+  while o < len(old_list) and n < len(new_list):
+    c = cmp(old_list[o], new_list[n])
+    if c == 0:
+      o += 1
+      n += 1
+    elif c < 0:
+      print "Removed: %s" % old_list[o]
+      o += 1
+    else:
+      print "Added: %s" % new_list[n]
+      n += 1
+  
+  while o < len(old_list):
+    print "Removed: %s" % old_list[o]
+    o += 1
+
+  while n < len(new_list):
+    print "Added: %s" % new_list[n]
+    n += 1
+
+
+def update_qtfiles(qtfiles_file, startdir, opts):
+  print "Parsing %s..." % qtfiles_file
+  with open(qtfiles_file) as f:
+    old_files = sorted([line.strip() for line in f if line])
+
+  print "Finding relevant files inside %s..." % startdir
+  new_files = sorted(list(find_existing(startdir, file_whitelist, file_blacklist, False)))
+
+  print "Comparing file lists..."
+  diff_lists(old_files, new_files)
+
+  if opts.write:
+    if opts.backup:
+      shutil.copyfile(qtfiles_file, qtfiles_file + ".bak")
+    with open(qtfiles_file, "w") as f:
+      for relpath in new_files:
+        print >> f, relpath
+
+
+def update_qtincludes(qtincludes_file, startdir, opts):
+  print "Parsing %s..." % qtincludes_file
+  with open(qtincludes_file) as f:
+    old_includes = sorted([line.strip() for line in f if line])
+
+  print "Finding include directories inside %s..." % startdir
+  new_includes = sorted(list(find_existing(startdir, inc_whitelist, inc_blacklist, True)) + opts.extra_includes)
+
+  print "Comparing directory lists..."
+  diff_lists(old_includes, new_includes)
+
+  if opts.write:
+    if opts.backup:
+      shutil.copyfile(qtincludes_file, qtincludes_file + ".bak")
+    with open(qtincludes_file, "w") as f:
+      for relpath in new_includes:
+        print >> f, relpath
+
+
+def add_args(args_file_path):
+  try:
+    args_file = open(args_file_path)
+    print >> sys.stderr, "Found extra args in %s:" % args_file_path
+    for line in args_file:
+      arg = line.strip()
+      sys.argv.append(arg)
+      print >> sys.stderr, "  %s" % arg
+  except:
+    pass
+
+
+def main():
+  global file_whitelist
+  global file_blacklist
+  global inc_whitelist
+  global inc_blacklist
+  global dir_blacklist
+
+  startdir = os.getcwd()
+  homedir = os.getenv("HOME")
+
+  # Look for .newfiles files in the current directory and the user's home
+  # directory. These files contain extra arguments which we append to our
+  # command line.
+  add_args(".newfiles")
+  if homedir is not None:
+    add_args(os.path.join(homedir, ".newfiles"))
+
+  usage = "Usage: %prog [options] [ <qtfiles> ] [ <qtincludes> ]"
+  parser = optparse.OptionParser(usage)
+  parser.add_option("-w", "--write", dest="write", action="store_true", default=False, help="Overwrite the QtCreator file list with the list of files found on disk.")
+  parser.add_option("--no-backup", dest="backup", action="store_false", default=True, help="Don't backup the QtCreator file list before overwriting it.")
+  parser.add_option("-i", "--extra-include", dest="extra_includes", action="append", default=[], help="An extra include directory to always add to the list. This option can be repeated to add multiple include directories.", metavar="DIR")
+  parser.add_option("--no-default-filters", dest="default_filters", action="store_false", default=True, help="Clear the default whitelists and blacklists, so that you can supply your own.")
+  parser.add_option("--file-whitelist", dest="file_whitelist", action="append", default=[], help="Add a glob expression which whitelists files. Don't forget to escape any wildcards in the expression, so that the shell doesn't expand them. This option can be repeated to add multiple expressions.", metavar="GLOB")
+  parser.add_option("--file-blacklist", dest="file_blacklist", action="append", default=[], help="Add a glob expression which blacklists files. Don't forget to escape any wildcards in the expression, so that the shell doesn't expand them. This option can be repeated to add multiple expressions.", metavar="GLOB")
+  parser.add_option("--inc-whitelist", dest="inc_whitelist", action="append", default=[], help="Add a glob expression which whitelists include directories. Don't forget to escape any wildcards in the expression, so that the shell doesn't expand them. This option can be repeated to add multiple expressions.", metavar="GLOB")
+  parser.add_option("--inc-blacklist", dest="inc_blacklist", action="append", default=[], help="Add a glob expression which blacklists include directories. Don't forget to escape any wildcards in the expression, so that the shell doesn't expand them. This option can be repeated to add multiple expressions.", metavar="GLOB")
+  parser.add_option("--dir-blacklist", dest="dir_blacklist", action="append", default=[], help="Add a glob expression which blacklists directories, so that they're never traversed. This affects the searches for files and include directories. Don't forget to escape any wildcards in the expression, so that the shell doesn't expand them. This option can be repeated to add multiple expressions.", metavar="GLOB")
+  opts, args = parser.parse_args()
+
+  if len(args) > 3:
+    parser.error("incorrect number of arguments")
+
+  if len(args) < 1:
+    qtfiles_file = guess_file(".files")
+    if qtfiles_file is None:
+      parser.error("unable to guess which .files file to use")
+  else:
+    qtfiles_file = args[0]
+
+  if len(args) < 2:
+    qtincludes_file = guess_file(".includes")
+    if qtincludes_file is None:
+      parser.error("unable to guess which .includes file to use")
+  else:
+    qtincludes_file = args[1]
+
+  if not opts.default_filters:
+    file_whitelist = []
+    file_blacklist = []
+    inc_whitelist = []
+    inc_blacklist = []
+    dir_blacklist = []
+
+  file_whitelist += opts.file_whitelist
+  file_blacklist += opts.file_blacklist
+  inc_whitelist += opts.inc_whitelist
+  inc_blacklist += opts.inc_blacklist
+  dir_blacklist += opts.dir_blacklist
+
+  update_qtincludes(qtincludes_file, startdir, opts)
+  update_qtfiles(qtfiles_file, startdir, opts)
+
+
+if __name__ == '__main__':
+  main()
+
