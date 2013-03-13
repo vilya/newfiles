@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import sys, os, optparse, shutil, re, fnmatch
+import sys, os, optparse, shutil, re, fnmatch, curses
 
 # Regenerate QtCreator project files to reflect changes in the file system
 # outside of the IDE (e.g. after updating from version control). We process the
@@ -193,6 +193,17 @@ def add_args(args_file_path):
     pass
 
 
+#
+# Main
+#
+
+def termsize():
+  curses.setupterm()
+  rows = curses.tigetnum('lines')
+  cols = curses.tigetnum('cols')
+  return rows, cols
+
+
 def main():
   global file_whitelist
   global file_blacklist
@@ -210,8 +221,12 @@ def main():
   if homedir is not None:
     add_args(os.path.join(homedir, ".newfiles"))
 
+  r, c = termsize()
+  #my_formatter = optparse.IndentedHelpFormatter(width=c)
+  my_formatter = optparse.TitledHelpFormatter(width=c)
+
   usage = "Usage: %prog [options] [ <qtfiles> ] [ <qtincludes> ]"
-  parser = optparse.OptionParser(usage)
+  parser = optparse.OptionParser(usage, formatter=my_formatter)
   parser.add_option("-w", "--write", dest="write", action="store_true", default=False, help="Overwrite the QtCreator file list with the list of files found on disk.")
   parser.add_option("--no-backup", dest="backup", action="store_false", default=True, help="Don't backup the QtCreator file list before overwriting it.")
   parser.add_option("-i", "--extra-include", dest="extra_includes", action="append", default=[], help="An extra include directory to always add to the list. This option can be repeated to add multiple include directories.", metavar="DIR")
