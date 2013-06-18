@@ -187,8 +187,9 @@ def add_args(args_file_path):
     print >> sys.stderr, "Found extra args in %s:" % args_file_path
     for line in args_file:
       arg = line.strip()
-      sys.argv.append(arg)
-      print >> sys.stderr, "  %s" % arg
+      if arg:
+        sys.argv.append(arg)
+        print >> sys.stderr, "  %s" % arg
   except:
     pass
 
