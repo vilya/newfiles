@@ -122,6 +122,7 @@ def guess_file(ext):
 def diff_lists(old_list, new_list):
   o = 0
   n = 0
+  changed = False
   while o < len(old_list) and n < len(new_list):
     c = cmp(old_list[o], new_list[n])
     if c == 0:
@@ -130,17 +131,23 @@ def diff_lists(old_list, new_list):
     elif c < 0:
       print "Removed: %s" % old_list[o]
       o += 1
+      changed = True
     else:
       print "Added: %s" % new_list[n]
       n += 1
-  
+      changed = True
+
   while o < len(old_list):
     print "Removed: %s" % old_list[o]
     o += 1
+    changed = True
 
   while n < len(new_list):
     print "Added: %s" % new_list[n]
     n += 1
+    changed = True
+
+  return changed
 
 
 def update_qtfiles(qtfiles_file, startdir, opts):
@@ -149,10 +156,14 @@ def update_qtfiles(qtfiles_file, startdir, opts):
     old_files = sorted([line.strip() for line in f if line])
 
   print "Finding relevant files inside %s..." % startdir
-  new_files = sorted(list(find_existing(startdir, file_whitelist, file_blacklist, False)))
+  new_files = sorted(list(set(find_existing(startdir, file_whitelist, file_blacklist, False))))
 
   print "Comparing file lists..."
-  diff_lists(old_files, new_files)
+  changed = diff_lists(old_files, new_files)
+
+  if opts.write and not changed:
+    print "No changes, not updating %s" % qtfiles_file
+    return
 
   if opts.write:
     if opts.backup:
@@ -160,7 +171,7 @@ def update_qtfiles(qtfiles_file, startdir, opts):
     with open(qtfiles_file, "w") as f:
       for relpath in new_files:
         print >> f, relpath
-
+      
 
 def update_qtincludes(qtincludes_file, startdir, opts):
   print "Parsing %s..." % qtincludes_file
@@ -168,10 +179,14 @@ def update_qtincludes(qtincludes_file, startdir, opts):
     old_includes = sorted([line.strip() for line in f if line])
 
   print "Finding include directories inside %s..." % startdir
-  new_includes = sorted(list(find_existing(startdir, inc_whitelist, inc_blacklist, True)) + opts.extra_includes)
+  new_includes = sorted(list(set(find_existing(startdir, inc_whitelist, inc_blacklist, True)) | set(opts.extra_includes)))
 
   print "Comparing directory lists..."
-  diff_lists(old_includes, new_includes)
+  changed = diff_lists(old_includes, new_includes)
+
+  if opts.write and not changed:
+    print "No changes, not updating %s" % qtincludes_file
+    return
 
   if opts.write:
     if opts.backup:
@@ -186,10 +201,10 @@ def add_args(args_file_path):
     args_file = open(args_file_path)
     print >> sys.stderr, "Found extra args in %s:" % args_file_path
     for line in args_file:
-      arg = line.strip()
-      if arg:
-        sys.argv.append(arg)
-        print >> sys.stderr, "  %s" % arg
+      args = line.strip().split()
+      if args:
+        sys.argv += args
+        print >> sys.stderr, "  %s" % " ".join(args)
   except:
     pass
 
