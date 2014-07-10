@@ -55,6 +55,8 @@ dir_blacklist = [
   "*/.svn", "*/CVS", "*/.git", "*/.uic", "*/.hg"
 ]
 
+# Whether to print extra output about things like extra args found in files.
+verbose = False
 
 #
 # Functions for finding existing files
@@ -151,14 +153,17 @@ def diff_lists(old_list, new_list):
 
 
 def update_qtfiles(qtfiles_file, startdir, opts):
-  print "Parsing %s..." % qtfiles_file
+  if verbose:
+    print "Parsing %s..." % qtfiles_file
   with open(qtfiles_file) as f:
     old_files = sorted([line.strip() for line in f if line])
 
-  print "Finding relevant files inside %s..." % startdir
+  if verbose:
+    print "Finding relevant files inside %s..." % startdir
   new_files = sorted(list(set(find_existing(startdir, file_whitelist, file_blacklist, False))))
 
-  print "Comparing file lists..."
+  if verbose:
+    print "Comparing file lists..."
   changed = diff_lists(old_files, new_files)
 
   if opts.write and not changed:
@@ -174,14 +179,17 @@ def update_qtfiles(qtfiles_file, startdir, opts):
       
 
 def update_qtincludes(qtincludes_file, startdir, opts):
-  print "Parsing %s..." % qtincludes_file
+  if verbose:
+    print "Parsing %s..." % qtincludes_file
   with open(qtincludes_file) as f:
     old_includes = sorted([line.strip() for line in f if line])
 
-  print "Finding include directories inside %s..." % startdir
+  if verbose:
+    print "Finding include directories inside %s..." % startdir
   new_includes = sorted(list(set(find_existing(startdir, inc_whitelist, inc_blacklist, True)) | set(opts.extra_includes)))
 
-  print "Comparing directory lists..."
+  if verbose:
+    print "Comparing directory lists..."
   changed = diff_lists(old_includes, new_includes)
 
   if opts.write and not changed:
@@ -199,12 +207,14 @@ def update_qtincludes(qtincludes_file, startdir, opts):
 def add_args(args_file_path):
   try:
     args_file = open(args_file_path)
-    print >> sys.stderr, "Found extra args in %s:" % args_file_path
+    if verbose:
+      print >> sys.stderr, "Found extra args in %s:" % args_file_path
     for line in args_file:
       args = line.strip().split()
       if args:
         sys.argv += args
-        print >> sys.stderr, "  %s" % " ".join(args)
+        if verbose:
+          print >> sys.stderr, "  %s" % " ".join(args)
   except:
     pass
 
@@ -226,9 +236,14 @@ def main():
   global inc_whitelist
   global inc_blacklist
   global dir_blacklist
+  global verbose
 
   startdir = os.getcwd()
   homedir = os.getenv("HOME")
+
+  # Need to set the verbose flag before calling add_args...
+  if "-v" in sys.argv or "--verbose" in sys.argv:
+    verbose = True
 
   # Look for .newfiles files in the current directory and the user's home
   # directory. These files contain extra arguments which we append to our
@@ -252,7 +267,10 @@ def main():
   parser.add_option("--inc-whitelist", dest="inc_whitelist", action="append", default=[], help="Add a glob expression which whitelists include directories. Don't forget to escape any wildcards in the expression, so that the shell doesn't expand them. This option can be repeated to add multiple expressions.", metavar="GLOB")
   parser.add_option("--inc-blacklist", dest="inc_blacklist", action="append", default=[], help="Add a glob expression which blacklists include directories. Don't forget to escape any wildcards in the expression, so that the shell doesn't expand them. This option can be repeated to add multiple expressions.", metavar="GLOB")
   parser.add_option("--dir-blacklist", dest="dir_blacklist", action="append", default=[], help="Add a glob expression which blacklists directories, so that they're never traversed. This affects the searches for files and include directories. Don't forget to escape any wildcards in the expression, so that the shell doesn't expand them. This option can be repeated to add multiple expressions.", metavar="GLOB")
+  parser.add_option("-v", "--verbose", dest="verbose", action="store_true", default=False, help="Print out extra information.")
   opts, args = parser.parse_args()
+
+  verbose = opts.verbose
 
   if len(args) > 3:
     parser.error("incorrect number of arguments")
