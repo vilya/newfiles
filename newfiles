@@ -108,12 +108,28 @@ def find_existing(startdir, whitelist, blacklist, dirs=False):
       yield p
 
 
-def guess_file(ext):
+def guess_startdir():
+  directory = os.getcwd()
+  while True:
+    print "Looking for project files in", directory
+    for f in os.listdir(directory):
+      _, ext = os.path.splitext(f)
+      if ext in (".files", ".includes") and os.path.isfile(os.path.join(directory, f)):
+        return directory
+
+    parentdir = os.path.dirname(directory)
+    if parentdir == directory:
+      return None
+    directory = parentdir
+
+
+def guess_file(ext, directory):
   '''Guess which file to use given a file extension.
   
   This will return the only file in the current directory with that extension.
   If there are no files, or if there is more than one, it will return None.'''
-  candidates = [f for f in os.listdir(os.getcwd()) if f.endswith(ext) and os.path.isfile(f)]
+  files = [os.path.join(directory, f) for f in os.listdir(directory)]
+  candidates = [f for f in files if f.endswith(ext) and os.path.isfile(f)]
   return candidates[0] if len(candidates) == 1 else None
 
 
@@ -152,7 +168,9 @@ def diff_lists(old_list, new_list):
   return changed
 
 
-def update_qtfiles(qtfiles_file, startdir, opts):
+def update_qtfiles(qtfiles_file, opts):
+  startdir = os.path.dirname(qtfiles_file)
+
   if verbose:
     print "Parsing %s..." % qtfiles_file
   with open(qtfiles_file) as f:
@@ -178,7 +196,9 @@ def update_qtfiles(qtfiles_file, startdir, opts):
         print >> f, relpath
       
 
-def update_qtincludes(qtincludes_file, startdir, opts):
+def update_qtincludes(qtincludes_file, opts):
+  startdir = os.path.dirname(qtincludes_file)
+
   if verbose:
     print "Parsing %s..." % qtincludes_file
   with open(qtincludes_file) as f:
@@ -218,6 +238,8 @@ def add_args(args_file_path):
   except:
     pass
 
+  
+
 
 #
 # Main
@@ -238,7 +260,7 @@ def main():
   global dir_blacklist
   global verbose
 
-  startdir = os.getcwd()
+  startdir = guess_startdir()
   homedir = os.getenv("HOME")
 
   # Need to set the verbose flag before calling add_args...
@@ -248,7 +270,7 @@ def main():
   # Look for .newfiles files in the current directory and the user's home
   # directory. These files contain extra arguments which we append to our
   # command line.
-  add_args(".newfiles")
+  add_args(os.path.join(startdir, ".newfiles"))
   if homedir is not None:
     add_args(os.path.join(homedir, ".newfiles"))
 
@@ -276,14 +298,14 @@ def main():
     parser.error("incorrect number of arguments")
 
   if len(args) < 1:
-    qtfiles_file = guess_file(".files")
+    qtfiles_file = guess_file(".files", startdir)
     if qtfiles_file is None:
       parser.error("unable to guess which .files file to use")
   else:
     qtfiles_file = args[0]
 
   if len(args) < 2:
-    qtincludes_file = guess_file(".includes")
+    qtincludes_file = guess_file(".includes", startdir)
     if qtincludes_file is None:
       parser.error("unable to guess which .includes file to use")
   else:
@@ -302,8 +324,8 @@ def main():
   inc_blacklist += opts.inc_blacklist
   dir_blacklist += opts.dir_blacklist
 
-  update_qtincludes(qtincludes_file, startdir, opts)
-  update_qtfiles(qtfiles_file, startdir, opts)
+  update_qtincludes(qtincludes_file, opts)
+  update_qtfiles(qtfiles_file, opts)
 
 
 if __name__ == '__main__':
