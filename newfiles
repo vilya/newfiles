@@ -90,11 +90,12 @@ def walk_unblacklisted_dirs(startdir):
     startpos += len(os.sep)
 
   for path, subdirs, files in os.walk(startdir):
+    relpath = path[startpos:]
+
     # Skip any blacklisted subdirectories.
-    subdirs[:] = [s for s in subdirs if not is_blacklisted_dir(os.path.join(path, s))]
+    subdirs[:] = [s for s in subdirs if not is_blacklisted_dir(os.path.join(relpath, s))]
 
     # Pass-through the remaining info
-    relpath = path[startpos:]
     yield relpath, subdirs, files
 
 
